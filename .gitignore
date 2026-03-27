@@ -1,0 +1,5 @@
+configs/accounts.env
+configs/*.p12
+__pycache__/
+*.pyc
+.DS_Store
