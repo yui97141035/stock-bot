@@ -14,6 +14,7 @@ import numpy as np
 from dotenv import load_dotenv
 from data.cache import get_price_cached, update_all
 from data.fundamental import get_monthly_revenue, get_eps
+from data.sentiment import full_sentiment
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', 'configs', 'accounts.env'))
 BOT_TOKEN  = os.getenv('DISCORD_BOT_TOKEN')
@@ -264,11 +265,20 @@ def build_report(mode: str) -> str:
             entry = round(r['close'] * 1.005, 1)
             stop  = round(r['close'] * 0.92, 1)
             tip = "明天開盤站穩再進，不要追高" if mode == 'close' else "今天開盤確認方向再進"
+            # 情緒分析
+            try:
+                df_p = get_price_cached(r['sid'], '2025-01-01')
+                sent = full_sentiment(r['sid'], df_p)
+                sent_icon = '🟢' if sent['verdict']=='多方有利' else '🔴' if sent['verdict']=='空方警示' else '⚪'
+                sent_str  = f"\n│ 法人/量能：{sent_icon}{sent['verdict']}（{', '.join(sent['signals'][:1] + sent['warnings'][:1])}）"
+            except:
+                sent_str = ''
             lines.append(
                 f"┌ **{r['name']} {r['sid']}**  現價 {r['close']}（{r['chg']:+.1f}%）\n"
                 f"│ 進場參考：{entry} 以下  停損：{stop}（-8%）\n"
                 f"│ 歷史勝率：買進後5天 {wr5}%，平均報酬 {avg5}%\n"
-                f"│ 原因：{'、'.join(r['reasons'])}\n"
+                f"│ 技術原因：{'、'.join(r['reasons'])}"
+                f"{sent_str}\n"
                 f"└ ⚠️ {tip}"
             )
     else:
