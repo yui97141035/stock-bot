@@ -182,11 +182,11 @@ if batch_btn:
         name = stock['name']
         progress.progress((i + 1) / len(WATCHLIST), text=f'回測 {name}({sid})...')
         try:
-            from data.fetch import get_price_history
-            import os
-            token = os.getenv('FINMIND_TOKEN', '') or None
-            df_s  = get_price_history(sid, start_date.strftime('%Y-%m-%d'),
-                                      end_date.strftime('%Y-%m-%d'), token)
+            from data.cache import get_price_cached
+            df_s = get_price_cached(sid, start_date.strftime('%Y-%m-%d'))
+            if df_s.empty:
+                continue
+            df_s = df_s[df_s['date'] <= pd.to_datetime(end_date)]
             if len(df_s) < 30:
                 continue
             from backtest.engine import run_single

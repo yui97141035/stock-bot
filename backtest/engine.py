@@ -10,6 +10,7 @@ import backtrader as bt
 import pandas as pd
 import numpy as np
 from data.fetch import get_price_history
+from data.cache import get_price_cached
 
 
 # ── 手續費設定 ──────────────────────────────────────────
@@ -168,8 +169,13 @@ def run_in_sample_out_sample(stock_id: str, start: str, split: str, end: str,
     start ~ split：訓練集（In-Sample）
     split ~ end  ：測試集（Out-of-Sample）
     """
-    token = os.getenv('FINMIND_TOKEN', '')
-    full_df = get_price_history(stock_id, start, end, token or None)
+    # 優先用本地快取，快取沒有才去 API 抓
+    full_df = get_price_cached(stock_id, start)
+    if full_df.empty:
+        token = os.getenv('FINMIND_TOKEN', '')
+        full_df = get_price_history(stock_id, start, end, token or None)
+    else:
+        full_df = full_df[full_df['date'] <= pd.to_datetime(end)]
 
     split_dt = pd.to_datetime(split)
     in_df    = full_df[pd.to_datetime(full_df['date']) <  split_dt]

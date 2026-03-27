@@ -6,7 +6,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import pandas as pd
-from data.fetch import get_price_history
+from data.cache import get_price_cached
 from backtest.engine import run_single, is_etf
 from dotenv import load_dotenv
 load_dotenv('configs/accounts.env')
@@ -48,9 +48,13 @@ def run_batch(strategy_cls, strategy_params: dict,
         etf  = is_etf(sid)
         print(f'[{i+1}/{total}] {name}({sid}) {"ETF" if etf else "個股"}...', end=' ', flush=True)
         try:
-            df = get_price_history(sid, start, end, token)
-            if 'date' not in df.columns and df.index.name == 'date':
-                df = df.reset_index()
+            df = get_price_cached(sid, start)
+            if df.empty:
+                print('無快取資料，跳過')
+                continue
+            # 截到指定結束日
+            if end:
+                df = df[df['date'] <= pd.to_datetime(end)]
             if len(df) < 30:
                 print('資料不足，跳過')
                 continue
