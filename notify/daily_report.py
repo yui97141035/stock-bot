@@ -17,6 +17,25 @@ from data.fundamental import get_monthly_revenue, get_eps
 from data.sentiment import full_sentiment
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', 'configs', 'accounts.env'))
+
+# 台灣國定假日（每年補充）
+TW_HOLIDAYS = {
+    '2026-01-01','2026-01-27','2026-01-28','2026-01-29','2026-01-30',
+    '2026-02-02','2026-02-27','2026-02-28','2026-04-03','2026-04-04',
+    '2026-04-05','2026-05-01','2026-06-19','2026-09-04','2026-10-01',
+    '2026-10-02','2026-10-10',
+}
+
+def next_trading_day() -> str:
+    """找下一個交易日（排除週末+國定假日）"""
+    d = pd.Timestamp.today() + pd.Timedelta(days=1)
+    for _ in range(14):
+        if d.weekday() < 5 and d.strftime('%Y-%m-%d') not in TW_HOLIDAYS:
+            return d.strftime('%Y-%m-%d（%A）').replace(
+                'Monday','一').replace('Tuesday','二').replace(
+                'Wednesday','三').replace('Thursday','四').replace('Friday','五')
+        d += pd.Timedelta(days=1)
+    return '下個交易日'
 BOT_TOKEN  = os.getenv('DISCORD_BOT_TOKEN')
 CHANNEL_ID = '1471384671651758125'
 
@@ -288,7 +307,8 @@ def build_report(mode: str) -> str:
     # ── 最重要：今天能不能進場 ──────────────────
     lines.append("")
     if buy_list:
-        action_word = "今天開盤可以考慮進場" if mode == 'open' else "明天開盤可以考慮進場"
+        next_day = next_trading_day()
+        action_word = "今天開盤可以考慮進場" if mode == 'open' else f"{next_day} 開盤可以考慮進場"
         lines.append(f"🟢 **{action_word}**")
         for r in buy_list:
             h5  = r['hist'].get(5, {})
@@ -298,7 +318,8 @@ def build_report(mode: str) -> str:
             # 進場建議價
             entry = round(r['close'] * 1.005, 1)
             stop  = round(r['close'] * 0.92, 1)
-            tip = "明天開盤站穩再進，不要追高" if mode == 'close' else "今天開盤確認方向再進"
+            next_day = next_trading_day()
+            tip = f"{next_day} 開盤站穩再進，不要追高" if mode == 'close' else "今天開盤確認方向再進"
             # 情緒分析
             try:
                 df_p = get_price_cached(r['sid'], '2025-01-01')
