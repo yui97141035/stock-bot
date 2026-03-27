@@ -3,3 +3,9 @@ configs/*.p12
 __pycache__/
 *.pyc
 .DS_Store
+# 測試用暫時檔案
+_test_*.py
+_check_*.py
+_signal_*.py
+_time_test.py
+_longterm.py
