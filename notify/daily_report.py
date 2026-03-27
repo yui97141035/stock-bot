@@ -288,7 +288,8 @@ def build_report(mode: str) -> str:
     # ── 最重要：今天能不能進場 ──────────────────
     lines.append("")
     if buy_list:
-        lines.append("🟢 **今天可以考慮進場**")
+        action_word = "今天開盤可以考慮進場" if mode == 'open' else "明天開盤可以考慮進場"
+        lines.append(f"🟢 **{action_word}**")
         for r in buy_list:
             h5  = r['hist'].get(5, {})
             h10 = r['hist'].get(10, {})
