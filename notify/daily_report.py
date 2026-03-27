@@ -263,12 +263,13 @@ def build_report(mode: str) -> str:
             # 進場建議價
             entry = round(r['close'] * 1.005, 1)
             stop  = round(r['close'] * 0.92, 1)
+            tip = "明天開盤站穩再進，不要追高" if mode == 'close' else "今天開盤確認方向再進"
             lines.append(
                 f"┌ **{r['name']} {r['sid']}**  現價 {r['close']}（{r['chg']:+.1f}%）\n"
                 f"│ 進場參考：{entry} 以下  停損：{stop}（-8%）\n"
                 f"│ 歷史勝率：買進後5天 {wr5}%，平均報酬 {avg5}%\n"
                 f"│ 原因：{'、'.join(r['reasons'])}\n"
-                f"└ ⚠️ 先確認今天開盤方向，不急著追"
+                f"└ ⚠️ {tip}"
             )
     else:
         lines.append("⚪ **今天沒有明確進場訊號，空手等待**")
