@@ -1,5 +1,5 @@
 import requests
-TOKEN = "MTQ3MTMyMTkzMDE5NTAxMzcyNQ.GvAqzi.lk-2eexi6oo2LG1826JCsolzJLErCmTcDeBruY"
+TOKEN = ""  # 填入你的 Bot Token
 CHANNEL = "1471384671651758125"
 headers = {"Authorization": f"Bot {TOKEN}", "Content-Type": "application/json"}
 r = requests.post(f"https://discord.com/api/v10/channels/{CHANNEL}/messages",

@@ -1,5 +1,5 @@
 import requests
-TOKEN = "MTQ3MTMyMTkzMDE5NTAxMzcyNQ.GvAqzi.lk-2eexi6oo2LG1826JCsolzJLErCmTcDeBruY"
+TOKEN = ""  # 填入你的 Bot Token
 headers = {"Authorization": f"Bot {TOKEN}"}
 
 # Bot 資訊
