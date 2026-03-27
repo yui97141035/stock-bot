@@ -217,34 +217,13 @@ def analyze(sid: str, name: str, is_etf: bool = False) -> dict:
 def build_report(mode: str) -> str:
     today = pd.Timestamp.today().strftime('%Y-%m-%d')
     icon  = '🌅' if mode == 'open' else '📊'
-    title = '開盤前趨勢' if mode == 'open' else '收盤後報告'
-
-    lines = [f"{icon} **{title}** {today}"]
-    lines.append("─" * 30)
-
-    # ETF 持倉
-    lines.append("**【ETF 持倉】**")
-    for sid, name in ETF_LIST.items():
-        try:
-            r = analyze(sid, name, is_etf=True)
-            trend_icon = '▲' if r['trend'] == '上升' else '▼'
-            h5 = r['hist'].get(5, {})
-            wr_str = f"  歷史勝率(5日)：{h5.get('win_rate','N/A')}%  平均報酬：{h5.get('avg_return','N/A')}%" if h5 else ''
-            lines.append(
-                f"`{name}({sid})`  {r['close']:.2f}  {r['chg']:+.2f}%  "
-                f"趨勢{trend_icon}  MA5:{r['ma5']}  MA20:{r['ma20']}"
-                f"{wr_str}"
-            )
-        except Exception as e:
-            lines.append(f"`{name}({sid})`  取得失敗: {e}")
-
-    lines.append("")
-    lines.append("**【個股監控】**")
+    title = '開盤前' if mode == 'open' else '收盤後'
 
     buy_list   = []
     watch_list = []
     wait_list  = []
 
+    # 分析個股
     for sid, name in STOCK_LIST.items():
         try:
             r = analyze(sid, name, is_etf=False)
@@ -254,42 +233,86 @@ def build_report(mode: str) -> str:
                 watch_list.append(r)
             else:
                 wait_list.append(r)
-        except Exception as e:
+        except:
             wait_list.append({'sid': sid, 'name': name, 'verdict': 'WAIT',
-                               'close': 0, 'chg': 0, 'trend': '?',
-                               'reasons': [], 'hist': {}, 'rev_signal': '', 'eps_signal': ''})
+                              'close': 0, 'chg': 0, 'trend': '下降',
+                              'reasons': [], 'hist': {}, 'rev_signal': '',
+                              'eps_signal': '', 'score': 0, 'pos52': 0})
 
+    # 分析 ETF
+    etf_results = {}
+    for sid, name in ETF_LIST.items():
+        try:
+            etf_results[sid] = analyze(sid, name, is_etf=True)
+        except:
+            pass
+
+    lines = []
+    lines.append(f"{icon} **台股{title}報告** {today}")
+    lines.append("━" * 28)
+
+    # ── 最重要：今天能不能進場 ──────────────────
+    lines.append("")
     if buy_list:
-        lines.append("🟢 **進場訊號**")
+        lines.append("🟢 **今天可以考慮進場**")
         for r in buy_list:
             h5  = r['hist'].get(5, {})
             h10 = r['hist'].get(10, {})
+            wr5  = h5.get('win_rate', '?')
+            avg5 = h5.get('avg_return', '?')
+            # 進場建議價
+            entry = round(r['close'] * 1.005, 1)
+            stop  = round(r['close'] * 0.92, 1)
             lines.append(
-                f"  **{r['name']}({r['sid']})**  收盤：{r['close']}  {r['chg']:+.1f}%\n"
-                f"  趨勢：{r['trend']}  52週位置：{r['pos52']}%  分數：{r['score']}\n"
-                f"  歷史勝率 — 5日:{h5.get('win_rate','N/A')}%({h5.get('avg_return','N/A')}%)  "
-                f"10日:{h10.get('win_rate','N/A')}%({h10.get('avg_return','N/A')}%)\n"
-                f"  {'營收：' + r['rev_signal'] if r['rev_signal'] else ''}"
-                f"  {'EPS：' + r['eps_signal'] if r['eps_signal'] else ''}\n"
-                f"  根據：{', '.join(r['reasons'])}"
+                f"┌ **{r['name']} {r['sid']}**  現價 {r['close']}（{r['chg']:+.1f}%）\n"
+                f"│ 進場參考：{entry} 以下  停損：{stop}（-8%）\n"
+                f"│ 歷史勝率：買進後5天 {wr5}%，平均報酬 {avg5}%\n"
+                f"│ 原因：{'、'.join(r['reasons'])}\n"
+                f"└ ⚠️ 先確認今天開盤方向，不急著追"
             )
+    else:
+        lines.append("⚪ **今天沒有明確進場訊號，空手等待**")
 
     if watch_list:
-        lines.append("🔵 **值得關注**（尚未完全確認）")
+        lines.append("")
+        lines.append("🔵 **快要到了，盯著這幾支**")
         for r in watch_list:
-            h5 = r['hist'].get(5, {})
-            lines.append(
-                f"  {r['name']}({r['sid']})  {r['close']}  {r['chg']:+.1f}%  "
-                f"趨勢：{r['trend']}  歷史勝率5日：{h5.get('win_rate','N/A')}%  "
-                f"根據：{', '.join(r['reasons']) if r['reasons'] else '訊號不足'}"
-            )
+            missing = []
+            if r['trend'] != '上升':
+                missing.append("等均線轉多")
+            else:
+                missing.append("等強陽線確認")
+            lines.append(f"  • **{r['name']}（{r['sid']}）** {r['close']}（{r['chg']:+.1f}%）— {missing[0]}")
 
+    # ── 持倉狀況 ──────────────────────────────
+    lines.append("")
+    lines.append("📦 **持倉狀況**")
+    HOLDINGS = {
+        '0050':   {'name': '元大台灣50',    'cost': 70.58},
+        '00662':  {'name': '富邦NASDAQ',    'cost': 102.35},
+        '009816': {'name': '凱基台灣TOP50', 'cost': 11.31},
+    }
+    for sid, info in HOLDINGS.items():
+        r = etf_results.get(sid)
+        if not r:
+            continue
+        cost  = info['cost']
+        pnl   = (r['close'] / cost - 1) * 100
+        trend_icon = '▲' if r['trend'] == '上升' else '▼'
+        action = '持有' if pnl > -15 else '⚠️ 接近停損'
+        lines.append(
+            f"  {info['name']}（{sid}）{r['close']}  "
+            f"成本{cost}  損益{pnl:+.1f}%  趨勢{trend_icon}  → {action}"
+        )
+
+    # ── 等待清單（簡短）──────────────────────
     if wait_list:
-        wait_names = '  '.join([f"{r['name']}({r['sid']})" for r in wait_list])
-        lines.append(f"⚪ **等待**：{wait_names}")
+        lines.append("")
+        wait_names = "、".join([f"{r['name']}" for r in wait_list])
+        lines.append(f"⏳ **繼續等待**：{wait_names}")
 
     lines.append("")
-    lines.append("_判斷依據：技術面 + 月營收 + EPS + 歷史勝率（2020至今）_")
+    lines.append(f"_資料：{today}收盤　訊號依據：均線+K線+月營收+EPS_")
     return '\n'.join(lines)
 
 
