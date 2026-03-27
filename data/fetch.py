@@ -22,6 +22,8 @@ def get_price_history(stock_id: str, start: str, end: str = None, token: str = N
         start_date=start,
         end_date=end or pd.Timestamp.today().strftime('%Y-%m-%d')
     )
+    if df.empty or 'date' not in df.columns:
+        return pd.DataFrame()
     df = df.sort_values('date').reset_index(drop=True)
     return df
 

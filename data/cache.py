@@ -33,7 +33,8 @@ def load_price(sid: str) -> pd.DataFrame:
     """讀本地快取，沒有就回傳空 DataFrame"""
     p = cache_path(sid, 'price')
     if p.exists():
-        df = pd.read_csv(p, parse_dates=['date'])
+        df = pd.read_csv(p)
+        df['date'] = pd.to_datetime(df['date'])
         return df.sort_values('date').reset_index(drop=True)
     return pd.DataFrame()
 
@@ -55,9 +56,9 @@ def update_price(sid: str, force: bool = False) -> pd.DataFrame:
     if existing.empty:
         start = START_DATE
     else:
-        last_date = existing['date'].max()
+        last_date = pd.to_datetime(existing['date'].max())
         # 如果今天已經是最新，不需要更新
-        if pd.to_datetime(last_date).strftime('%Y-%m-%d') >= today:
+        if last_date.strftime('%Y-%m-%d') >= today:
             return existing
         start = (last_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
 
