@@ -63,7 +63,10 @@ def update_price(sid: str, force: bool = False) -> pd.DataFrame:
         start = (last_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
 
     token = os.getenv('FINMIND_TOKEN', '')
-    new_df = get_price_history(sid, start, today, token or None)
+    try:
+        new_df = get_price_history(sid, start, today, token or None)
+    except Exception:
+        return existing  # API 失敗就用本地資料
 
     if new_df.empty:
         return existing

@@ -248,6 +248,39 @@ def build_report(mode: str) -> str:
         except:
             pass
 
+    def etf_buy_signal(r, sent) -> tuple[str, list]:
+        """ETF 加碼買入判斷，回傳（建議, 原因清單）"""
+        reasons = []
+        score   = 0
+
+        # 1. 52週低點附近
+        if r['pos52'] < 30:
+            score += 2; reasons.append(f"52週低點區（位置{r['pos52']:.0f}%，歷史便宜價）")
+        elif r['pos52'] < 45:
+            score += 1; reasons.append(f"52週中低位（位置{r['pos52']:.0f}%）")
+
+        # 2. 均線轉多
+        if r.get('golden'):
+            score += 2; reasons.append("均線黃金交叉（趨勢轉多）")
+        elif r['trend'] == '上升':
+            score += 1; reasons.append("均線上升趨勢")
+
+        # 3. 法人買超
+        inst_net = sent.get('institutional', {}).get('total_net', 0)
+        if inst_net > 0:
+            score += 1; reasons.append(f"法人買超 {inst_net:,} 張")
+
+        # 4. 跌破MA60後站回來
+        if r['close'] > r['ma60'] and r['close'] < r['ma60'] * 1.03:
+            score += 1; reasons.append("剛站回MA60（逢低反彈）")
+
+        if score >= 3:
+            return '🟢 建議加碼', reasons
+        elif score >= 2:
+            return '🔵 可以考慮加碼', reasons
+        else:
+            return '⚪ 正常定期定額即可', reasons
+
     lines = []
     lines.append(f"{icon} **台股{title}報告** {today}")
     lines.append("━" * 28)
@@ -297,7 +330,7 @@ def build_report(mode: str) -> str:
 
     # ── 持倉狀況 ──────────────────────────────
     lines.append("")
-    lines.append("📦 **持倉狀況**")
+    lines.append("📦 **ETF 持倉 & 加碼建議**")
     HOLDINGS = {
         '0050':   {'name': '元大台灣50',    'cost': 70.58},
         '00662':  {'name': '富邦NASDAQ',    'cost': 102.35},
@@ -309,11 +342,24 @@ def build_report(mode: str) -> str:
             continue
         cost  = info['cost']
         pnl   = (r['close'] / cost - 1) * 100
+        stop  = round(cost * 0.85, 2)
         trend_icon = '▲' if r['trend'] == '上升' else '▼'
-        action = '持有' if pnl > -15 else '⚠️ 接近停損'
+        action = '⚠️ 接近停損' if pnl < -12 else ''
+
+        # ETF 情緒分析
+        try:
+            df_p = get_price_cached(sid, '2025-01-01')
+            sent = full_sentiment(sid, df_p)
+        except:
+            sent = {}
+
+        buy_tip, buy_reasons = etf_buy_signal(r, sent)
+
         lines.append(
-            f"  {info['name']}（{sid}）{r['close']}  "
-            f"成本{cost}  損益{pnl:+.1f}%  趨勢{trend_icon}  → {action}"
+            f"\n  **{info['name']}（{sid}）**\n"
+            f"  現價 {r['close']}  成本 {cost}  損益 {pnl:+.1f}%  趨勢{trend_icon}  停損 {stop}  {action}\n"
+            f"  加碼建議：{buy_tip}\n"
+            f"  {'原因：' + '、'.join(buy_reasons) if buy_reasons else '無明顯加碼訊號，維持定期定額'}"
         )
 
     # ── 等待清單（簡短）──────────────────────
