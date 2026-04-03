@@ -1,52 +1,24 @@
 # -*- coding: utf-8 -*-
 """
 notify/stock_monitor.py
-個股基本面 + 技術面綜合監控
+個股基本面 + 技術面 + 情緒面 綜合監控
 每月10日（營收公布後）+ 每週五收盤後執行
 """
 import sys, os
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-import requests
 import pandas as pd
-from dotenv import load_dotenv
-from data.cache import get_price_cached, update_revenue, update_eps, load_revenue, load_eps
-
-load_dotenv(os.path.join(os.path.dirname(__file__), '..', 'configs', 'accounts.env'))
-
-BOT_TOKEN  = os.getenv('DISCORD_BOT_TOKEN')
-CHANNEL_ID = '1471384671651758125'
-
-# 監控個股
-STOCKS = [
-    {'id': '1519', 'name': '華城'},
-    {'id': '2330', 'name': '台積電'},
-    {'id': '2382', 'name': '廣達'},
-    {'id': '3017', 'name': '奇鋐'},
-    {'id': '3131', 'name': '弘塑'},
-    {'id': '3231', 'name': '緯創'},
-    {'id': '3324', 'name': '雙鴻'},
-    {'id': '8064', 'name': '東捷'},
-]
-
-
-def send_discord(msg: str):
-    if not BOT_TOKEN:
-        print(f"[未設定Token] {msg[:80]}")
-        return
-    r = requests.post(
-        f'https://discord.com/api/v10/channels/{CHANNEL_ID}/messages',
-        json={'content': msg},
-        headers={'Authorization': f'Bot {BOT_TOKEN}', 'Content-Type': 'application/json'}
-    )
-    print(f"[{'OK' if r.status_code==200 else r.status_code}] {msg[:60]}...")
+from data.cache import get_price_cached, update_revenue, update_eps
+from data.sentiment import full_sentiment
+from notify.discord_bot import send_message, STOCK_LIST
 
 
 def analyze_stock(sid: str, name: str) -> dict:
     result = {'sid': sid, 'name': name, 'signals': [], 'warnings': [], 'verdict': ''}
 
     # ── 技術面 ──────────────────────────────────────────
+    price_df = None
     try:
         price_df = get_price_cached(sid, '2020-01-01')
         price_df = price_df.sort_values('date').reset_index(drop=True)
@@ -54,7 +26,6 @@ def analyze_stock(sid: str, name: str) -> dict:
         o     = price_df['open'].iloc[-1]
         h     = price_df['max'].iloc[-1]
         l     = price_df['min'].iloc[-1]
-        date  = price_df['date'].iloc[-1]
         chg   = (c - price_df['close'].iloc[-2]) / price_df['close'].iloc[-2] * 100
         ma5   = price_df['close'].tail(5).mean()
         ma20  = price_df['close'].tail(20).mean()
@@ -67,7 +38,7 @@ def analyze_stock(sid: str, name: str) -> dict:
         dead       = pm5 >= pm20 and ma5 < ma20
         body       = abs(c - o)
         total      = h - l if h != l else 0.0001
-        bull_k     = c > o and body/total >= 0.6 and c >= (h+l)/2
+        bull_k     = c > o and body / total >= 0.6 and c >= (h + l) / 2
 
         result['price'] = c
         result['chg']   = chg
@@ -95,16 +66,13 @@ def analyze_stock(sid: str, name: str) -> dict:
             latest_rev = rev.iloc[-1]
             prev_rev   = rev.iloc[-2]
             mom = (latest_rev['revenue'] / prev_rev['revenue'] - 1) * 100
-            # 年增率（跟去年同月比）
+            yoy = None
             if len(rev) >= 13:
-                yoy_rev = rev.iloc[-13]['revenue']
-                yoy = (latest_rev['revenue'] / yoy_rev - 1) * 100
-            else:
-                yoy = None
+                yoy = (latest_rev['revenue'] / rev.iloc[-13]['revenue'] - 1) * 100
 
             result['rev_mom'] = round(mom, 1)
             result['rev_yoy'] = round(yoy, 1) if yoy else None
-            result['rev_date'] = str(latest_rev['date'].date())
+            result['rev_date'] = str(latest_rev['date'].date()) if hasattr(latest_rev['date'], 'date') else str(latest_rev['date'])[:10]
 
             if mom > 10:
                 result['signals'].append(f"營收：月增 +{mom:.1f}%（強勁成長）")
@@ -130,7 +98,7 @@ def analyze_stock(sid: str, name: str) -> dict:
             eps_chg    = (latest_eps['eps'] - prev_eps['eps']) / abs(prev_eps['eps']) * 100 \
                          if prev_eps['eps'] != 0 else 0
             result['eps']      = latest_eps['eps']
-            result['eps_date'] = str(latest_eps['date'].date())
+            result['eps_date'] = str(latest_eps['date'].date()) if hasattr(latest_eps['date'], 'date') else str(latest_eps['date'])[:10]
             result['eps_chg']  = round(eps_chg, 1)
 
             if eps_chg > 20:
@@ -143,13 +111,32 @@ def analyze_stock(sid: str, name: str) -> dict:
     except Exception as e:
         result['warnings'].append(f'EPS資料取得失敗: {e}')
 
-    # ── 綜合判斷 ─────────────────────────────────────────
-    tech_ok = '技術：' in ' '.join(result['signals'])
-    rev_ok  = '營收：' in ' '.join(result['signals'])
+    # ── 情緒面（法人 + 借券 + 量能）────────────────────
+    try:
+        if price_df is not None and len(price_df) > 5:
+            df_recent = price_df[price_df['date'] >= pd.to_datetime('2025-01-01')]
+            if len(df_recent) > 5:
+                sent = full_sentiment(sid, df_recent)
+                result['sentiment'] = sent
 
-    if len(result['signals']) >= 3 and tech_ok and rev_ok:
+                if sent['score'] >= 2:
+                    result['signals'].append(f"情緒：{sent['verdict']}（{', '.join(sent['signals'][:2])}）")
+                elif sent['score'] <= -2:
+                    result['warnings'].append(f"情緒：{sent['verdict']}（{', '.join(sent['warnings'][:2])}）")
+    except Exception as e:
+        print(f'  {sid} 情緒分析失敗: {e}')
+
+    # ── 綜合判斷 ─────────────────────────────────────────
+    tech_ok = any('技術：' in s for s in result['signals'])
+    rev_ok  = any('營收：' in s for s in result['signals'])
+    sent_ok = any('情緒：' in s for s in result['signals'])
+
+    sig_count = len(result['signals'])
+    if sig_count >= 3 and tech_ok and rev_ok:
         result['verdict'] = 'BUY'
-    elif len(result['signals']) >= 2 and tech_ok:
+    elif sig_count >= 3 and tech_ok and sent_ok:
+        result['verdict'] = 'BUY'
+    elif sig_count >= 2 and tech_ok:
         result['verdict'] = 'WATCH'
     elif result['warnings']:
         result['verdict'] = 'WAIT'
@@ -168,18 +155,18 @@ def format_discord_msg(r: dict) -> str:
     v = verdict_map.get(r['verdict'], '⚪ 繼續等待')
 
     lines = [f"**{r['name']}（{r['sid']}）** {v}"]
-    lines.append(f"收盤 {r.get('price','N/A')} ({r.get('chg',0):+.1f}%)  趨勢：{r.get('trend','N/A')}")
+    lines.append(f"收盤 {r.get('price', 'N/A')} ({r.get('chg', 0):+.1f}%)  趨勢：{r.get('trend', 'N/A')}")
 
     if r.get('eps'):
-        lines.append(f"最新EPS：{r['eps']} ({r.get('eps_date','')})  季增：{r.get('eps_chg',0):+.1f}%")
+        lines.append(f"最新EPS：{r['eps']} ({r.get('eps_date', '')})  季增：{r.get('eps_chg', 0):+.1f}%")
     if r.get('rev_mom') is not None:
         yoy_str = f"  年增：{r['rev_yoy']:+.1f}%" if r.get('rev_yoy') else ''
-        lines.append(f"最新營收月增：{r['rev_mom']:+.1f}%{yoy_str}  ({r.get('rev_date','')})")
+        lines.append(f"最新營收月增：{r['rev_mom']:+.1f}%{yoy_str}  ({r.get('rev_date', '')})")
 
     if r['signals']:
-        lines.append("正面訊號：" + "、".join([s.split('：')[1] for s in r['signals']]))
+        lines.append("正面訊號：" + "、".join([s.split('：', 1)[1] if '：' in s else s for s in r['signals']]))
     if r['warnings']:
-        lines.append("注意事項：" + "、".join([w.split('：')[1] if '：' in w else w for w in r['warnings']]))
+        lines.append("注意事項：" + "、".join([w.split('：', 1)[1] if '：' in w else w for w in r['warnings']]))
 
     return '\n'.join(lines)
 
@@ -188,11 +175,12 @@ def run_monitor():
     today = pd.Timestamp.today().strftime('%Y-%m-%d')
     print(f"=== 個股監控 {today} ===\n")
 
-    buy_signals  = []
+    buy_signals   = []
     watch_signals = []
-    wait_list    = []
+    wait_list     = []
 
-    for s in STOCKS:
+    stocks = [{'id': sid, 'name': name} for sid, name in STOCK_LIST.items()]
+    for s in stocks:
         print(f"分析 {s['name']}({s['id']})...", end=' ', flush=True)
         r = analyze_stock(s['id'], s['name'])
         print(r['verdict'])
@@ -221,20 +209,10 @@ def run_monitor():
         names = '、'.join([f"{r['name']}({r['sid']})" for r in wait_list])
         msg_parts.append(f"\n**——— 繼續等待 ———**\n{names}")
 
-    msg_parts.append("\n_技術面 + 月營收 + EPS 三項綜合判斷_")
+    msg_parts.append("\n_技術面 + 月營收 + EPS + 法人情緒 綜合判斷_")
 
     full_msg = '\n'.join(msg_parts)
-
-    # Discord 限制 2000 字，超過就切割
-    if len(full_msg) <= 2000:
-        send_discord(full_msg)
-    else:
-        send_discord(msg_parts[0] + '\n（詳細見下方）')
-        for r in buy_signals + watch_signals:
-            send_discord(format_discord_msg(r))
-        if wait_list:
-            names = '、'.join([f"{r['name']}({r['sid']})" for r in wait_list])
-            send_discord(f"繼續等待：{names}")
+    send_message(full_msg)
 
 
 if __name__ == '__main__':
